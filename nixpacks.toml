@@ -1,5 +1,0 @@
-[phases.setup]
-nixPkgs = ["tesseract", "zbar"]
-
-[start]
-cmd = "gunicorn app:app"
