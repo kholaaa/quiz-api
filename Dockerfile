@@ -1,6 +1,6 @@
 FROM python:3.11-slim
 
-# Install required system packages
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
     libzbar0 \
     tesseract-ocr \
@@ -17,5 +17,5 @@ COPY . .
 
 EXPOSE 5000
 
-# Fixed CMD - uses shell to properly read $PORT from Railway
-CMD sh -c 'gunicorn --bind 0.0.0.0:${PORT:-5000} app:app'
+# Best working version for Railway + Gunicorn
+CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${PORT:-5000} app:app"]
