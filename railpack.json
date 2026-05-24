@@ -1,0 +1,5 @@
+{
+  "install": {
+    "aptPackages": ["tesseract-ocr", "libzbar0"]
+  }
+}
