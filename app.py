@@ -78,17 +78,55 @@ def extract_student_info(img):
 def read_bubbles(img):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+    
+    # More sensitive threshold
     thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1]
+    
+    # Find contours
     contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
     bubbles = []
     for c in contours:
         x, y, w, h = cv2.boundingRect(c)
         ratio = w / float(h)
         area = cv2.contourArea(c)
-        if 0.8 <= ratio <= 1.2 and 200 <= area <= 3000:
+        
+        # More flexible conditions
+        if 0.7 <= ratio <= 1.4 and 100 <= area <= 5000:
             bubbles.append((x, y, w, h))
-    bubbles = sorted(bubbles, key=lambda b: (b[1] // 20, b[0]))
+    
+    # Sort bubbles (row by row)
+    bubbles = sorted(bubbles, key=lambda b: (b[1] // 25, b[0]))
+    
     options = ["A", "B", "C", "D"]
+    
+    def get_answer(row):
+        if len(row) < 4:
+            return None
+        best = None
+        best_fill = 0
+        for idx, (x, y, w, h) in enumerate(row[:4]):
+            roi = thresh[y:y+h, x:x+w]
+            fill = cv2.countNonZero(roi) / float(w * h)
+            if fill > best_fill:
+                best_fill = fill
+                best = idx
+        if best_fill < 0.25:   # Lowered threshold
+            return None
+        return options[best] if best is not None else None
+
+    rows = [bubbles[i:i+4] for i in range(0, len(bubbles), 4)]
+    
+    part1 = {}
+    part2 = {}
+    
+    for i, row in enumerate(rows[:8]):
+        part1[f"Q{i+1}"] = get_answer(row)
+    
+    for i, row in enumerate(rows[8:16]):
+        part2[f"Q{i+1}"] = get_answer(row)
+    
+    return {"part1": part1, "part2": part2}
 
     def get_answer(row):
         best = None
