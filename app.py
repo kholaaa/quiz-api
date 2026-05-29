@@ -15,29 +15,14 @@ def load_image_from_request(file):
     return img
 
 def decode_qr(img):
-    # Try multiple preprocessing methods for better QR detection
     decoded = decode(img)
-    
-    # If direct decode fails, try with grayscale
-    if not decoded:
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        decoded = decode(gray)
-    
-    # Try with inverted image
-    if not decoded:
-        inverted = cv2.bitwise_not(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY))
-        decoded = decode(inverted)
-    
     if not decoded:
         return None
-
     payload = decoded[0].data.decode("utf-8")
     result = {"raw": payload, "part1": {}, "part2": {}, "title": ""}
-
     try:
         parts = payload.split("|")
         result["title"] = parts[0].strip()
-        
         for part in parts[1:]:
             part = part.strip()
             if part.startswith("Part-I:"):
@@ -50,9 +35,8 @@ def decode_qr(img):
                     kv = item.split("=")
                     if len(kv) == 2:
                         result["part2"][kv[0]] = kv[1]
-    except Exception:
-        pass  # Still return what we have
-
+    except Exception as e:
+        result["parse_error"] = str(e)
     return result
 
 def extract_student_info(img):
