@@ -387,7 +387,7 @@ def _grid_fallback_full(thresh, gh, gw):
 # ─────────────────────────────────────────────
 
 def grade(student_answers, answer_key, negative_marking=False):
-    correct = incorrect = unattempted = 0
+    correct = incorrect = unattempted = invalid = 0
     breakdown = {}
     for part in ["part1", "part2"]:
         s_part = student_answers.get(part, {})
@@ -399,7 +399,10 @@ def grade(student_answers, answer_key, negative_marking=False):
             correct_a = a_part.get(qk)
             if not correct_a:
                 continue
-            if not student_a or student_a == "INVALID":
+            if student_a == "INVALID":
+                invalid += 1
+                breakdown[key] = "invalid"
+            elif not student_a:
                 unattempted += 1
                 breakdown[key] = "unattempted"
             elif student_a == correct_a:
@@ -408,15 +411,26 @@ def grade(student_answers, answer_key, negative_marking=False):
             else:
                 incorrect += 1
                 breakdown[key] = "incorrect"
-    total = correct + incorrect + unattempted
-    marks = correct - (0.25 * incorrect if negative_marking else 0)
+
+    total = correct + incorrect + unattempted + invalid
+    # Negative marking: -0.25 for wrong AND invalid (multi-filled)
+    if negative_marking:
+        marks = correct - (0.25 * incorrect) - (0.25 * invalid)
+    else:
+        marks = correct
+
     pct = round(marks / total * 100, 1) if total > 0 else 0.0
     letter = ("A" if pct >= 90 else "B" if pct >= 80
               else "C" if pct >= 70 else "D" if pct >= 60 else "F")
     return {
-        "correct": correct, "incorrect": incorrect,
-        "unattempted": unattempted, "score": f"{correct}/{total}",
-        "percentage": pct, "grade": letter, "breakdown": breakdown
+        "correct": correct,
+        "incorrect": incorrect,
+        "unattempted": unattempted,
+        "invalid": invalid,
+        "score": f"{correct}/{total}",
+        "percentage": pct,
+        "grade": letter,
+        "breakdown": breakdown
     }
 
 # ─────────────────────────────────────────────
