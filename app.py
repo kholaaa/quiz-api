@@ -403,53 +403,88 @@ def batch():
         if "Set-" in title:
             quiz_set = title.split("Set-")[-1].split()[0]
 
+        # Build row in exact column order required by assignment
         row = {
-            "Quiz": title,
-            "Set": quiz_set,
-            "Class": "BSE-4A",
+            "Quiz":    title,
+            "Set":     quiz_set,
+            "Class":   "BSE-4A",
             "Subject": "Artificial Intelligence",
-            "Name": student_info.get("name", ""),
-            "Reg No": student_info.get("reg_no", ""),
-            "Correct": grade_result["correct"],
-            "Incorrect": grade_result["incorrect"],
-            "Unattempted": grade_result["unattempted"],
-            "Total Marks": grade_result["correct"],
-            "Percentage": grade_result["percentage"],
-            "Grade": grade_result["grade"],
-            "Score": grade_result["score"],
+            "Name":    student_info.get("name", ""),
+            "Reg No":  student_info.get("reg_no", ""),
         }
-        for part, prefix in [("part1", "Part1"), ("part2", "Part2")]:
-            for q in range(1, 9):
-                row[prefix + "_Q" + str(q).zfill(2)] = student_answers.get(
-                    part, {}).get("Q" + str(q), "")
+        # Part1_Q01 ... Part1_Q08
+        for q in range(1, 9):
+            row["Part1_Q" + str(q).zfill(2)] = student_answers.get("part1", {}).get("Q" + str(q), "")
+        # Part2_Q01 ... Part2_Q08
+        for q in range(1, 9):
+            row["Part2_Q" + str(q).zfill(2)] = student_answers.get("part2", {}).get("Q" + str(q), "")
+        # Scoring columns
+        row["Correct"]     = grade_result["correct"]
+        row["Incorrect"]   = grade_result["incorrect"]
+        row["Unattempted"] = grade_result["unattempted"]
+        row["Total Marks"] = grade_result["correct"]
+        row["Percentage"]  = grade_result["percentage"]
+        row["Grade"]       = grade_result["grade"]
         all_results.append(row)
 
     if not all_results:
         return jsonify({"error": "No valid quizzes", "details": errors}), 400
 
     df = pd.DataFrame(all_results)
+
+    # Single summary row — class average, highest score, lowest score
     summary = {
-        "Quiz": "SUMMARY",
-        "Set": "",
-        "Class": "BSE-4A",
-        "Subject": "Artificial Intelligence",
-        "Name": "CLASS AVERAGE",
-        "Reg No": "",
-        "Correct": round(df["Correct"].mean(), 1),
-        "Incorrect": round(df["Incorrect"].mean(), 1),
+        "Quiz":        "SUMMARY",
+        "Set":         "",
+        "Class":       "BSE-4A",
+        "Subject":     "Artificial Intelligence",
+        "Name":        "Class Avg: " + str(round(df["Percentage"].mean(), 1)) + "%" +
+                       "  |  Highest: " + str(df["Total Marks"].max()) +
+                       "  |  Lowest: "  + str(df["Total Marks"].min()),
+        "Reg No":      "",
+        "Correct":     round(df["Correct"].mean(), 1),
+        "Incorrect":   round(df["Incorrect"].mean(), 1),
         "Unattempted": round(df["Unattempted"].mean(), 1),
-        "Total Marks": "Avg:" + str(round(df["Total Marks"].mean(), 1)) +
-                       " High:" + str(df["Total Marks"].max()) +
-                       " Low:" + str(df["Total Marks"].min()),
-        "Percentage": round(df["Percentage"].mean(), 1),
-        "Grade": "",
-        "Score": ""
+        "Total Marks": round(df["Total Marks"].mean(), 1),
+        "Percentage":  round(df["Percentage"].mean(), 1),
+        "Grade":       "",
     }
+    for q in range(1, 9):
+        summary["Part1_Q" + str(q).zfill(2)] = ""
+        summary["Part2_Q" + str(q).zfill(2)] = ""
+
     df = pd.concat([df, pd.DataFrame([summary])], ignore_index=True)
+
+    # Auto-name file with quiz title + timestamp (as required)
+    quiz_title = all_results[0].get("Quiz", "Quiz").replace(" ", "_").replace("|", "")
     os.makedirs("output", exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    fn = "quiz_results_" + ts + ".xlsx"
-    df.to_excel("output/" + fn, index=False)
+    fn = quiz_title + "_" + ts + ".xlsx"
+    filepath = "output/" + fn
+
+    # Style the Excel output
+    with pd.ExcelWriter(filepath, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="Results")
+        wb = writer.book
+        ws = writer.sheets["Results"]
+        from openpyxl.styles import PatternFill, Font, Alignment
+        # Header row — bold + blue background
+        header_fill = PatternFill("solid", fgColor="4472C4")
+        header_font = Font(bold=True, color="FFFFFF")
+        for cell in ws[1]:
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal="center")
+        # Summary rows — yellow background
+        summary_fill = PatternFill("solid", fgColor="FFD966")
+        for row_idx in range(len(all_results) + 2, len(df) + 2):
+            for cell in ws[row_idx]:
+                cell.fill = summary_fill
+                cell.font = Font(bold=True)
+        # Auto-fit column widths
+        for col in ws.columns:
+            max_len = max((len(str(c.value)) if c.value else 0) for c in col)
+            ws.column_dimensions[col[0].column_letter].width = min(max_len + 4, 20)
     return jsonify({
         "message": "Processed " + str(len(all_results)) + " quizzes",
         "results": all_results,
