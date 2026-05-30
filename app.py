@@ -479,20 +479,28 @@ def batch():
         student_answers = read_bubbles(img)
         neg = "negative" in answer_key.get("raw", "").lower()
         grade_result = grade(student_answers, answer_key, neg)
-        row = {
-            "Quiz": answer_key.get("title", ""),
-            "Set": answer_key.get("title", "").split("Set-")[-1]
-                   if "Set-" in answer_key.get("title", "") else "",
-            "Name": student_info.get("name", ""),
-            "Reg No": student_info.get("reg_no", ""),
-            "Correct": grade_result["correct"],
-            "Incorrect": grade_result["incorrect"],
-            "Unattempted": grade_result["unattempted"],
-            "Total Marks": grade_result["correct"],
-            "Percentage": grade_result["percentage"],
-            "Grade": grade_result["grade"],
-            "Score": grade_result["score"],
-        }
+       # Extract class and subject from QR title or use defaults
+title = answer_key.get("title", "")
+quiz_set = title.split("Set-")[-1].split()[0] if "Set-" in title else ""
+
+row = {
+    "Quiz": title,
+    "Set": quiz_set,
+    "Class": "BSE-4A",
+    "Subject": "Artificial Intelligence",
+    "Name": student_info.get("name", ""),
+    "Reg No": student_info.get("reg_no", ""),
+    "Correct": grade_result["correct"],
+    "Incorrect": grade_result["incorrect"],
+    "Unattempted": grade_result["unattempted"],
+    "Total Marks": grade_result["correct"],
+    "Percentage": grade_result["percentage"],
+    "Grade": grade_result["grade"],
+    "Score": grade_result["score"],
+}
+for part, prefix in [("part1","Part1"),("part2","Part2")]:
+    for q in range(1,9):
+        row[f"{prefix}_Q{q:02d}"] = student_answers.get(part,{}).get(f"Q{q}","")
         for part, prefix in [("part1", "Part1"), ("part2", "Part2")]:
             for q in range(1, 9):
                 row[f"{prefix}_Q{q:02d}"] = student_answers.get(
@@ -503,13 +511,20 @@ def batch():
                         "details": errors}), 400
     df = pd.DataFrame(all_results)
     summary = {
-        "Quiz": "SUMMARY",
-        "Percentage": round(df["Percentage"].mean(), 1),
-        "Total Marks": (f"Avg:{df['Total Marks'].mean():.1f} "
-                        f"High:{df['Total Marks'].max()} "
-                        f"Low:{df['Total Marks'].min()}"),
-        "Grade": ""
-    }
+    "Quiz": "SUMMARY",
+    "Set": "",
+    "Class": "BSE-4A",
+    "Subject": "Artificial Intelligence",
+    "Name": "CLASS AVERAGE",
+    "Reg No": "",
+    "Correct": round(df["Correct"].mean(), 1),
+    "Incorrect": round(df["Incorrect"].mean(), 1),
+    "Unattempted": round(df["Unattempted"].mean(), 1),
+    "Total Marks": f"Avg:{df['Total Marks'].mean():.1f} High:{df['Total Marks'].max()} Low:{df['Total Marks'].min()}",
+    "Percentage": round(df["Percentage"].mean(), 1),
+    "Grade": "",
+    "Score": ""
+}
     df = pd.concat([df, pd.DataFrame([summary])], ignore_index=True)
     os.makedirs("output", exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
