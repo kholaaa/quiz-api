@@ -10,18 +10,10 @@ import re
 
 app = Flask(__name__)
 
-# ─────────────────────────────────────────────
-# IMAGE LOADING
-# ─────────────────────────────────────────────
-
 def load_image(file):
     img_bytes = np.frombuffer(file.read(), np.uint8)
     img = cv2.imdecode(img_bytes, cv2.IMREAD_COLOR)
     return img
-
-# ─────────────────────────────────────────────
-# QR DECODING
-# ─────────────────────────────────────────────
 
 def _try_opencv_qr(img):
     detector = cv2.QRCodeDetector()
@@ -48,30 +40,32 @@ def _preprocess_variants(img):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     variants = [img, gray]
     for scale in [2, 3]:
-        variants.append(cv2.resize(img,  (w*scale, h*scale), interpolation=cv2.INTER_CUBIC))
+        variants.append(cv2.resize(img, (w*scale, h*scale), interpolation=cv2.INTER_CUBIC))
         variants.append(cv2.resize(gray, (w*scale, h*scale), interpolation=cv2.INTER_CUBIC))
-    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
+    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
     enhanced = clahe.apply(gray)
     variants.append(enhanced)
     variants.append(cv2.resize(enhanced, (w*2, h*2), interpolation=cv2.INTER_CUBIC))
-    kernel = np.array([[0,-1,0],[-1,5,-1],[0,-1,0]])
+    kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]])
     variants.append(cv2.filter2D(gray, -1, kernel))
     _, otsu = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     variants.append(otsu)
     variants.append(cv2.resize(otsu, (w*2, h*2), interpolation=cv2.INTER_NEAREST))
-    blur = cv2.GaussianBlur(gray, (3,3), 0)
+    blur = cv2.GaussianBlur(gray, (3, 3), 0)
     adapt = cv2.adaptiveThreshold(blur, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                                    cv2.THRESH_BINARY, 11, 2)
     variants.append(adapt)
     for frac_h in [0.30, 0.40]:
         for frac_left in [0.50, 0.55, 0.60]:
-            crop_c = img [0:int(h*frac_h), int(w*frac_left):]
+            crop_c = img[0:int(h*frac_h), int(w*frac_left):]
             crop_g = gray[0:int(h*frac_h), int(w*frac_left):]
             cw, ch = crop_c.shape[1], crop_c.shape[0]
-            variants += [crop_c,
-                         cv2.resize(crop_c, (cw*3, ch*3), interpolation=cv2.INTER_CUBIC),
-                         crop_g,
-                         cv2.resize(crop_g, (cw*3, ch*3), interpolation=cv2.INTER_CUBIC)]
+            variants += [
+                crop_c,
+                cv2.resize(crop_c, (cw*3, ch*3), interpolation=cv2.INTER_CUBIC),
+                crop_g,
+                cv2.resize(crop_g, (cw*3, ch*3), interpolation=cv2.INTER_CUBIC)
+            ]
     return variants
 
 def decode_qr(img):
@@ -100,53 +94,36 @@ def _parse_qr_payload(payload):
             for token in body.split():
                 m = re.match(r"Q0*(\d+)=([A-Da-d])", token)
                 if m:
-                    result[prefix][f"Q{m.group(1)}"] = m.group(2).upper()
+                    result[prefix]["Q" + m.group(1)] = m.group(2).upper()
     except Exception as e:
         result["parse_error"] = str(e)
     return result
 
-# ─────────────────────────────────────────────
-# STUDENT INFO OCR — improved reg number detection
-# ─────────────────────────────────────────────
-
 def extract_student_info(img):
     try:
         h, w = img.shape[:2]
-        # Use top 35% for header area
         header = img[0:int(h * 0.35), :]
         gray = cv2.cvtColor(header, cv2.COLOR_BGR2GRAY)
-
-        # Try multiple preprocessing for better OCR
         results_text = []
 
-        # Method 1 — enlarged + otsu
         enlarged = cv2.resize(gray, (gray.shape[1]*3, gray.shape[0]*3),
                               interpolation=cv2.INTER_CUBIC)
         blur = cv2.GaussianBlur(enlarged, (3, 3), 0)
-        _, thresh1 = cv2.threshold(blur, 0, 255,
-                                   cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        results_text.append(pytesseract.image_to_string(
-            thresh1, config='--oem 3 --psm 6'))
+        _, thresh1 = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        results_text.append(pytesseract.image_to_string(thresh1, config='--oem 3 --psm 6'))
 
-        # Method 2 — adaptive threshold
         blur2 = cv2.GaussianBlur(gray, (3, 3), 0)
-        thresh2 = cv2.adaptiveThreshold(blur2, 255,
-                                        cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+        thresh2 = cv2.adaptiveThreshold(blur2, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                                         cv2.THRESH_BINARY, 11, 2)
         enlarged2 = cv2.resize(thresh2, (thresh2.shape[1]*3, thresh2.shape[0]*3),
                                interpolation=cv2.INTER_CUBIC)
-        results_text.append(pytesseract.image_to_string(
-            enlarged2, config='--oem 3 --psm 6'))
+        results_text.append(pytesseract.image_to_string(enlarged2, config='--oem 3 --psm 6'))
 
-        # Method 3 — right half only for reg number
         right_half = gray[:, w//2:]
-        enlarged3 = cv2.resize(right_half,
-                               (right_half.shape[1]*3, right_half.shape[0]*3),
+        enlarged3 = cv2.resize(right_half, (right_half.shape[1]*3, right_half.shape[0]*3),
                                interpolation=cv2.INTER_CUBIC)
-        _, thresh3 = cv2.threshold(enlarged3, 0, 255,
-                                   cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        results_text.append(pytesseract.image_to_string(
-            thresh3, config='--oem 3 --psm 6'))
+        _, thresh3 = cv2.threshold(enlarged3, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        results_text.append(pytesseract.image_to_string(thresh3, config='--oem 3 --psm 6'))
 
         name = ""
         reg_no = ""
@@ -155,8 +132,6 @@ def extract_student_info(img):
             lines = [l.strip() for l in full_text.split('\n') if l.strip()]
             for i, line in enumerate(lines):
                 ll = line.lower()
-
-                # Find name
                 if 'name' in ll and not name:
                     if ':' in line:
                         c = line.split(':', 1)[1].strip()
@@ -164,20 +139,13 @@ def extract_student_info(img):
                             name = c
                     elif i + 1 < len(lines):
                         name = lines[i + 1]
-
-                # Find reg number — multiple patterns
                 if not reg_no:
-                    # Pattern 1: "Registration #" or "Reg #"
                     if ('reg' in ll or 'registration' in ll) and '#' in line:
                         reg_no = line.split('#', 1)[1].strip()
-
-                    # Pattern 2: "Registration:" or "Reg No:"
                     elif ('reg' in ll or 'registration' in ll) and ':' in line:
                         c = line.split(':', 1)[1].strip()
                         if len(c) > 1:
                             reg_no = c
-
-                    # Pattern 3: looks like BSE-FA24-XXX or FA24-BSE-XXX format
                     elif re.search(r'[A-Z]{2,4}[-_]?[A-Z]{0,3}[-_]?\d{2,4}[-_]\d{3}',
                                    line, re.IGNORECASE):
                         match = re.search(
@@ -185,16 +153,11 @@ def extract_student_info(img):
                             line, re.IGNORECASE)
                         if match:
                             reg_no = match.group(0).upper()
-
-                    # Pattern 4: next line after reg label
                     elif ('reg' in ll or 'registration' in ll) and i + 1 < len(lines):
                         reg_no = lines[i + 1]
-
-            # Stop if both found
             if name and reg_no:
                 break
 
-        # Clean up reg_no — remove common OCR noise
         if reg_no:
             reg_no = re.sub(r'[^A-Za-z0-9\-]', '', reg_no).upper()
 
@@ -205,23 +168,15 @@ def extract_student_info(img):
     except Exception as e:
         return {"name": "OCR error", "reg_no": str(e)}
 
-# ─────────────────────────────────────────────
-# BUBBLE SHEET READING — with perspective correction
-# ─────────────────────────────────────────────
-
 def read_bubbles(img):
     h, w = img.shape[:2]
-
-    # ── Step 1: Crop to answer grid area (below header) ──
     grid = img[int(h * 0.35):int(h * 0.99), int(w * 0.02):int(w * 0.98)]
     gh, gw = grid.shape[:2]
 
-    # ── Step 2: Perspective correction ──
     gray_g = cv2.cvtColor(grid, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray_g, (5, 5), 0)
     edged = cv2.Canny(blurred, 30, 120)
-    contours, _ = cv2.findContours(
-        edged, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours, _ = cv2.findContours(edged, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     best_rect = None
     best_area = 0
@@ -243,24 +198,18 @@ def read_bubbles(img):
         rect[1] = pts[np.argmin(diff)]
         rect[3] = pts[np.argmax(diff)]
         dst_w, dst_h = 700, 600
-        dst = np.array([[0, 0], [dst_w, 0],
-                        [dst_w, dst_h], [0, dst_h]], dtype=np.float32)
+        dst = np.array([[0, 0], [dst_w, 0], [dst_w, dst_h], [0, dst_h]], dtype=np.float32)
         M = cv2.getPerspectiveTransform(rect, dst)
         warped = cv2.warpPerspective(grid, M, (dst_w, dst_h))
     else:
         warped = grid
 
     wh, ww = warped.shape[:2]
-
-    # ── Step 3: Threshold ──
     wgray = cv2.cvtColor(warped, cv2.COLOR_BGR2GRAY)
     wblur = cv2.GaussianBlur(wgray, (5, 5), 0)
-    _, thresh = cv2.threshold(wblur, 0, 255,
-                              cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    _, thresh = cv2.threshold(wblur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
 
-    # ── Step 4: Find bubble contours ──
-    contours, _ = cv2.findContours(
-        thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
     bubbles = []
     min_r = min(wh, ww) * 0.025
@@ -270,10 +219,8 @@ def read_bubbles(img):
         x, y, bw, bh = cv2.boundingRect(c)
         area = cv2.contourArea(c)
         ratio = bw / float(bh) if bh > 0 else 0
-        if (0.55 <= ratio <= 1.8
-                and min_r <= bw <= max_r
-                and min_r <= bh <= max_r
-                and area >= 60):
+        if (0.55 <= ratio <= 1.8 and min_r <= bw <= max_r
+                and min_r <= bh <= max_r and area >= 60):
             cx = x + bw // 2
             cy = y + bh // 2
             roi = thresh[y:y+bh, x:x+bw]
@@ -283,7 +230,6 @@ def read_bubbles(img):
     if len(bubbles) < 8:
         return _grid_fallback_full(thresh, wh, ww)
 
-    # ── Step 5: Cluster into rows ──
     bubbles_sorted = sorted(bubbles, key=lambda b: b[1])
     rows = []
     current_row = [bubbles_sorted[0]]
@@ -295,7 +241,6 @@ def read_bubbles(img):
             current_row.append(b)
     rows.append(current_row)
 
-    # Keep rows with 4+ bubbles, max 8
     rows = [r for r in rows if len(r) >= 4]
     rows = rows[:8]
 
@@ -303,31 +248,24 @@ def read_bubbles(img):
     part2 = {}
 
     for ri, row in enumerate(rows):
-        qk = f"Q{ri + 1}"
+        qk = "Q" + str(ri + 1)
         row_sorted = sorted(row, key=lambda b: b[0])
-
-        # Split at midpoint into Part-I (left) and Part-II (right)
-        mid = ww * 0.5
-        left = [b for b in row_sorted if b[0] < mid]
-        right = [b for b in row_sorted if b[0] >= mid]
-
+        # ── FIXED: use 45%/55% gap instead of 50% to avoid centre Q-number column ──
+        left  = [b for b in row_sorted if b[0] < ww * 0.45]
+        right = [b for b in row_sorted if b[0] > ww * 0.55]
         part1[qk] = _pick_answer(left)
         part2[qk] = _pick_answer(right)
 
     return {"part1": part1, "part2": part2}
 
-
 def _pick_answer(bubbles_in_row):
     options = ["A", "B", "C", "D"]
     if not bubbles_in_row:
         return None
-
     row = sorted(bubbles_in_row, key=lambda b: b[0])[:4]
-
     best_idx = None
     best_fill = 0.0
     sec_fill = 0.0
-
     for i, b in enumerate(row):
         fill = b[4]
         if fill > best_fill:
@@ -336,13 +274,11 @@ def _pick_answer(bubbles_in_row):
             best_idx = i
         elif fill > sec_fill:
             sec_fill = fill
-
     if best_fill < 0.28:
         return None
     if best_fill - sec_fill < 0.10 and sec_fill > 0.18:
         return "INVALID"
     return options[best_idx] if best_idx is not None and best_idx < 4 else None
-
 
 def _grid_fallback_full(thresh, gh, gw):
     options = ["A", "B", "C", "D"]
@@ -351,14 +287,11 @@ def _grid_fallback_full(thresh, gh, gw):
     row_h = gh / 8
     p1_w = gw * 0.42
     p2_start = gw * 0.58
-    p2_w = gw - p2_start
     col_w1 = p1_w / 4
-    col_w2 = p2_w / 4
-
+    col_w2 = (gw - p2_start) / 4
     for row in range(8):
-        qk = f"Q{row + 1}"
+        qk = "Q" + str(row + 1)
         y1, y2 = int(row * row_h), int((row + 1) * row_h)
-
         best_f1, best1 = 0, None
         for col in range(4):
             x1 = int(col * col_w1)
@@ -368,7 +301,6 @@ def _grid_fallback_full(thresh, gh, gw):
             if f > best_f1:
                 best_f1, best1 = f, col
         part1[qk] = options[best1] if best1 is not None and best_f1 >= 0.25 else None
-
         best_f2, best2 = 0, None
         for col in range(4):
             x1 = int(p2_start + col * col_w2)
@@ -378,13 +310,7 @@ def _grid_fallback_full(thresh, gh, gw):
             if f > best_f2:
                 best_f2, best2 = f, col
         part2[qk] = options[best2] if best2 is not None and best_f2 >= 0.25 else None
-
     return {"part1": part1, "part2": part2}
-
-
-# ─────────────────────────────────────────────
-# GRADING
-# ─────────────────────────────────────────────
 
 def grade(student_answers, answer_key, negative_marking=False):
     correct = incorrect = unattempted = invalid = 0
@@ -393,8 +319,8 @@ def grade(student_answers, answer_key, negative_marking=False):
         s_part = student_answers.get(part, {})
         a_part = answer_key.get(part, {})
         for q_num in range(1, 9):
-            qk = f"Q{q_num}"
-            key = f"{part}_{qk}"
+            qk = "Q" + str(q_num)
+            key = part + "_" + qk
             student_a = s_part.get(qk)
             correct_a = a_part.get(qk)
             if not correct_a:
@@ -411,14 +337,11 @@ def grade(student_answers, answer_key, negative_marking=False):
             else:
                 incorrect += 1
                 breakdown[key] = "incorrect"
-
     total = correct + incorrect + unattempted + invalid
-    # Negative marking: -0.25 for wrong AND invalid (multi-filled)
     if negative_marking:
         marks = correct - (0.25 * incorrect) - (0.25 * invalid)
     else:
         marks = correct
-
     pct = round(marks / total * 100, 1) if total > 0 else 0.0
     letter = ("A" if pct >= 90 else "B" if pct >= 80
               else "C" if pct >= 70 else "D" if pct >= 60 else "F")
@@ -427,15 +350,11 @@ def grade(student_answers, answer_key, negative_marking=False):
         "incorrect": incorrect,
         "unattempted": unattempted,
         "invalid": invalid,
-        "score": f"{correct}/{total}",
+        "score": str(correct) + "/" + str(total),
         "percentage": pct,
         "grade": letter,
         "breakdown": breakdown
     }
-
-# ─────────────────────────────────────────────
-# ROUTES
-# ─────────────────────────────────────────────
 
 @app.route("/health", methods=["GET"])
 def health():
@@ -449,8 +368,7 @@ def scan():
     answer_key = decode_qr(img)
     if not answer_key:
         student_info = extract_student_info(img)
-        return jsonify({"error": "QR code not found",
-                        "student": student_info}), 400
+        return jsonify({"error": "QR code not found", "student": student_info}), 400
     student_info = extract_student_info(img)
     student_answers = read_bubbles(img)
     neg = "negative" in answer_key.get("raw", "").lower()
@@ -479,59 +397,61 @@ def batch():
         student_answers = read_bubbles(img)
         neg = "negative" in answer_key.get("raw", "").lower()
         grade_result = grade(student_answers, answer_key, neg)
-       # Extract class and subject from QR title or use defaults
-title = answer_key.get("title", "")
-quiz_set = title.split("Set-")[-1].split()[0] if "Set-" in title else ""
 
-row = {
-    "Quiz": title,
-    "Set": quiz_set,
-    "Class": "BSE-4A",
-    "Subject": "Artificial Intelligence",
-    "Name": student_info.get("name", ""),
-    "Reg No": student_info.get("reg_no", ""),
-    "Correct": grade_result["correct"],
-    "Incorrect": grade_result["incorrect"],
-    "Unattempted": grade_result["unattempted"],
-    "Total Marks": grade_result["correct"],
-    "Percentage": grade_result["percentage"],
-    "Grade": grade_result["grade"],
-    "Score": grade_result["score"],
-}
-for part, prefix in [("part1","Part1"),("part2","Part2")]:
-    for q in range(1,9):
-        row[f"{prefix}_Q{q:02d}"] = student_answers.get(part,{}).get(f"Q{q}","")
+        title = answer_key.get("title", "")
+        quiz_set = ""
+        if "Set-" in title:
+            quiz_set = title.split("Set-")[-1].split()[0]
+
+        row = {
+            "Quiz": title,
+            "Set": quiz_set,
+            "Class": "BSE-4A",
+            "Subject": "Artificial Intelligence",
+            "Name": student_info.get("name", ""),
+            "Reg No": student_info.get("reg_no", ""),
+            "Correct": grade_result["correct"],
+            "Incorrect": grade_result["incorrect"],
+            "Unattempted": grade_result["unattempted"],
+            "Total Marks": grade_result["correct"],
+            "Percentage": grade_result["percentage"],
+            "Grade": grade_result["grade"],
+            "Score": grade_result["score"],
+        }
         for part, prefix in [("part1", "Part1"), ("part2", "Part2")]:
             for q in range(1, 9):
-                row[f"{prefix}_Q{q:02d}"] = student_answers.get(
-                    part, {}).get(f"Q{q}", "")
+                row[prefix + "_Q" + str(q).zfill(2)] = student_answers.get(
+                    part, {}).get("Q" + str(q), "")
         all_results.append(row)
+
     if not all_results:
-        return jsonify({"error": "No valid quizzes",
-                        "details": errors}), 400
+        return jsonify({"error": "No valid quizzes", "details": errors}), 400
+
     df = pd.DataFrame(all_results)
     summary = {
-    "Quiz": "SUMMARY",
-    "Set": "",
-    "Class": "BSE-4A",
-    "Subject": "Artificial Intelligence",
-    "Name": "CLASS AVERAGE",
-    "Reg No": "",
-    "Correct": round(df["Correct"].mean(), 1),
-    "Incorrect": round(df["Incorrect"].mean(), 1),
-    "Unattempted": round(df["Unattempted"].mean(), 1),
-    "Total Marks": f"Avg:{df['Total Marks'].mean():.1f} High:{df['Total Marks'].max()} Low:{df['Total Marks'].min()}",
-    "Percentage": round(df["Percentage"].mean(), 1),
-    "Grade": "",
-    "Score": ""
-}
+        "Quiz": "SUMMARY",
+        "Set": "",
+        "Class": "BSE-4A",
+        "Subject": "Artificial Intelligence",
+        "Name": "CLASS AVERAGE",
+        "Reg No": "",
+        "Correct": round(df["Correct"].mean(), 1),
+        "Incorrect": round(df["Incorrect"].mean(), 1),
+        "Unattempted": round(df["Unattempted"].mean(), 1),
+        "Total Marks": "Avg:" + str(round(df["Total Marks"].mean(), 1)) +
+                       " High:" + str(df["Total Marks"].max()) +
+                       " Low:" + str(df["Total Marks"].min()),
+        "Percentage": round(df["Percentage"].mean(), 1),
+        "Grade": "",
+        "Score": ""
+    }
     df = pd.concat([df, pd.DataFrame([summary])], ignore_index=True)
     os.makedirs("output", exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    fn = f"quiz_results_{ts}.xlsx"
-    df.to_excel(f"output/{fn}", index=False)
+    fn = "quiz_results_" + ts + ".xlsx"
+    df.to_excel("output/" + fn, index=False)
     return jsonify({
-        "message": f"Processed {len(all_results)} quizzes",
+        "message": "Processed " + str(len(all_results)) + " quizzes",
         "results": all_results,
         "errors": errors,
         "file": fn
@@ -539,7 +459,7 @@ for part, prefix in [("part1","Part1"),("part2","Part2")]:
 
 @app.route("/download/<filename>", methods=["GET"])
 def download(filename):
-    path = f"output/{filename}"
+    path = "output/" + filename
     if not os.path.exists(path):
         return jsonify({"error": "File not found"}), 404
     return send_file(path, as_attachment=True)
